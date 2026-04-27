@@ -65,6 +65,46 @@ def create_dflash_block_mask(
     )
 
 
+def create_dflash_dense_mask(
+    anchor_positions: torch.Tensor,
+    block_keep_mask: torch.Tensor,
+    S: int,
+    block_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Token-level dense bool mask with the same semantics as
+    create_dflash_block_mask. Returns shape [B, 1, Q_LEN, KV_LEN] (True = attend).
+
+    BlockMask.to_dense() yields the *block-level* mask (one entry per
+    BlockMask-internal block), which is incompatible with SDPA. SDPA needs the
+    full token-level mask. We rebuild it directly from the mask_mod logic.
+    """
+    B, N = anchor_positions.shape
+    Q_LEN = N * block_size
+    KV_LEN = S + N * block_size
+
+    q_idx = torch.arange(Q_LEN, device=device)
+    kv_idx = torch.arange(KV_LEN, device=device)
+
+    q_block_id = q_idx // block_size                      # [Q_LEN]
+    safe_q_block_id = q_block_id.clamp(max=N - 1)         # [Q_LEN]
+
+    anchor_pos = anchor_positions[:, safe_q_block_id]     # [B, Q_LEN]
+    is_context = kv_idx < S                               # [KV_LEN]
+    mask_context = is_context[None, None, :] & (kv_idx[None, None, :] < anchor_pos[:, :, None])  # [B, Q_LEN, KV_LEN]
+
+    is_draft = ~is_context                                # [KV_LEN]
+    kv_block_id = (kv_idx - S) // block_size              # [KV_LEN]
+    mask_draft_qkv = is_draft[None, :] & (q_block_id[:, None] == kv_block_id[None, :])  # [Q_LEN, KV_LEN]
+    mask_draft = mask_draft_qkv[None, :, :].expand(B, -1, -1)  # [B, Q_LEN, KV_LEN]
+
+    is_valid_block = block_keep_mask[:, safe_q_block_id]  # [B, Q_LEN]
+    in_bounds = q_block_id < N                            # [Q_LEN]
+
+    mask = (mask_context | mask_draft) & is_valid_block[:, :, None] & in_bounds[None, :, None]
+    return mask.unsqueeze(1)  # [B, 1, Q_LEN, KV_LEN]
+
+
 class OnlineDFlashModel(nn.Module):
     """DFlash online training wrapper with block-wise CE loss."""
 
@@ -286,21 +326,28 @@ class OnlineDFlashModel(nn.Module):
                 [context_position_ids, draft_position_ids], dim=2
             )
 
-        dflash_attn_mask = create_dflash_block_mask(
-            anchor_positions=anchor_positions,
-            block_keep_mask=block_keep_mask,
-            S=seq_len,
-            block_size=self.block_size,
-            device=device,
-        )
-        # SDPA / eager backends need a dense Tensor mask, not a BlockMask
-        # (PR #495 always emits BlockMask without checking the chosen backend).
-        # `to_dense()` materializes shape (B, H, Q_LEN, KV_LEN) of dtype bool;
-        # since create_block_mask was called with H=None the H dim is 1 and
-        # SDPA's broadcast over heads handles it naturally. Memory cost grows
-        # vs sparse BlockMask but is fine for our short context lengths.
-        if self.attention_backend != "flex_attention":
-            dflash_attn_mask = dflash_attn_mask.to_dense().bool()
+        # PR #495 only emits the flex_attention BlockMask. SDPA / eager backends
+        # need a token-level dense Tensor mask of shape [B, 1, Q_LEN, KV_LEN].
+        # BlockMask.to_dense() returns BLOCK-level (e.g. [1, 1, 3, 8]) which
+        # SDPA can't expand against the actual [B, H, Q_LEN, KV_LEN] attention
+        # tensors. We compute the token-level mask directly from the same
+        # mask_mod logic via create_dflash_dense_mask.
+        if self.attention_backend == "flex_attention":
+            dflash_attn_mask = create_dflash_block_mask(
+                anchor_positions=anchor_positions,
+                block_keep_mask=block_keep_mask,
+                S=seq_len,
+                block_size=self.block_size,
+                device=device,
+            )
+        else:
+            dflash_attn_mask = create_dflash_dense_mask(
+                anchor_positions=anchor_positions,
+                block_keep_mask=block_keep_mask,
+                S=seq_len,
+                block_size=self.block_size,
+                device=device,
+            )
 
         output_hidden = self.draft_model(
             position_ids=full_position_ids,
