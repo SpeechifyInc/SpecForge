@@ -293,6 +293,14 @@ class OnlineDFlashModel(nn.Module):
             block_size=self.block_size,
             device=device,
         )
+        # SDPA / eager backends need a dense Tensor mask, not a BlockMask
+        # (PR #495 always emits BlockMask without checking the chosen backend).
+        # `to_dense()` materializes shape (B, H, Q_LEN, KV_LEN) of dtype bool;
+        # since create_block_mask was called with H=None the H dim is 1 and
+        # SDPA's broadcast over heads handles it naturally. Memory cost grows
+        # vs sparse BlockMask but is fine for our short context lengths.
+        if self.attention_backend != "flex_attention":
+            dflash_attn_mask = dflash_attn_mask.to_dense()
 
         output_hidden = self.draft_model(
             position_ids=full_position_ids,
