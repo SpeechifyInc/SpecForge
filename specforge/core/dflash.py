@@ -300,7 +300,7 @@ class OnlineDFlashModel(nn.Module):
         # SDPA's broadcast over heads handles it naturally. Memory cost grows
         # vs sparse BlockMask but is fine for our short context lengths.
         if self.attention_backend != "flex_attention":
-            dflash_attn_mask = dflash_attn_mask.to_dense()
+            dflash_attn_mask = dflash_attn_mask.to_dense().bool()
 
         output_hidden = self.draft_model(
             position_ids=full_position_ids,
