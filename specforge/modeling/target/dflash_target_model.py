@@ -5,21 +5,46 @@ from typing import List, Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from sglang.srt.configs.model_config import ModelConfig
-from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
-from sglang.srt.managers.scheduler import Scheduler
-from sglang.srt.mem_cache.cache_init_params import CacheInitParams
-from sglang.srt.mem_cache.radix_cache import RadixCache
-from sglang.srt.model_executor.forward_batch_info import CaptureHiddenMode, ForwardBatch
-from sglang.srt.sampling.sampling_params import SamplingParams
-from sglang.srt.server_args import ServerArgs
-from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
-from sglang.srt.utils import require_mlp_sync, require_mlp_tp_gather
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from specforge.distributed import get_tp_group
 
-from .sglang_backend import SGLangRunner
+# sglang is only used by SGLangDFlashTargetModel and the SGLang backend runner.
+# Module-level try/except keeps DFlash+HF users from needing a working sglang
+# install. If sglang isn't present, names below are bound to None — class
+# definitions still succeed (Python accepts None as an annotation), and any
+# attempt to actually CALL these symbols raises a clear TypeError at use time.
+try:
+    from sglang.srt.configs.model_config import ModelConfig
+    from sglang.srt.managers.schedule_batch import Req, ScheduleBatch
+    from sglang.srt.managers.scheduler import Scheduler
+    from sglang.srt.mem_cache.cache_init_params import CacheInitParams
+    from sglang.srt.mem_cache.radix_cache import RadixCache
+    from sglang.srt.model_executor.forward_batch_info import (
+        CaptureHiddenMode,
+        ForwardBatch,
+    )
+    from sglang.srt.sampling.sampling_params import SamplingParams
+    from sglang.srt.server_args import ServerArgs
+    from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
+    from sglang.srt.utils import require_mlp_sync, require_mlp_tp_gather
+
+    from .sglang_backend import SGLangRunner
+except ImportError:
+    ModelConfig = None
+    Req = None
+    ScheduleBatch = None
+    Scheduler = None
+    CacheInitParams = None
+    RadixCache = None
+    CaptureHiddenMode = None
+    ForwardBatch = None
+    SamplingParams = None
+    ServerArgs = None
+    SpeculativeAlgorithm = None
+    require_mlp_sync = None
+    require_mlp_tp_gather = None
+    SGLangRunner = None
 
 QWEN3_5_MODEL_TYPES = {"qwen3_5", "qwen3_5_moe"}
 VLM_MODEL_TYPES = QWEN3_5_MODEL_TYPES

@@ -2,7 +2,32 @@ import argparse
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from sglang.srt.server_args import ATTENTION_BACKEND_CHOICES
+# Inline copy of sglang.srt.server_args.ATTENTION_BACKEND_CHOICES so DFlash
+# users with --target-model-backend hf don't need a working sglang install.
+# Keep in sync with upstream sglang's list when adding new attention backends.
+ATTENTION_BACKEND_CHOICES = [
+    # Common
+    "triton",
+    "torch_native",
+    "flex_attention",
+    "nsa",
+    # NVIDIA specific
+    "cutlass_mla",
+    "fa3",
+    "fa4",
+    "flashinfer",
+    "flashmla",
+    "trtllm_mla",
+    "trtllm_mha",
+    "dual_chunk_flash_attn",
+    # AMD specific
+    "aiter",
+    "wave",
+    # Other platforms
+    "intel_amx",
+    "ascend",
+    "intel_xpu",
+]
 
 
 @dataclass
