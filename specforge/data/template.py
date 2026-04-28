@@ -59,7 +59,7 @@ class TemplateRegistry:
             override(bool): Whether to override the existing template, default to False
         """
         assert (
-            (name not in self.templates) or override or name == "qwen3.5"
+            (name not in self.templates) or override
         ), f"Chat template for the model type {name} has already been registered"
         self.templates[name] = template
 
@@ -334,15 +334,3 @@ TEMPLATE_REGISTRY.register(
     ),
 )
 
-
-TEMPLATE_REGISTRY.register(
-    name="qwen3.5",
-    template=ChatTemplate(
-        assistant_header="<|im_start|>assistant\n<think>\n",
-        user_header="<|im_start|>user\n",
-        system_prompt="",
-        end_of_turn_token="<|im_end|>\n",
-        parser_type="thinking",
-        enable_thinking=True,
-    ),
-)
